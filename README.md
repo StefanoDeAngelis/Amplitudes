@@ -1,2 +1,6 @@
-# SpinorHelicity
-A Mathematica package to handle Scattering Amplitudes computations using Spinor Helicity Formalism
+# Amplitudes
+A series of Mathematica packages I implemented and used over the years to handle Scattering Amplitudes computations. It contains several functions to work with Spinor Helicity Formalism, as well as d-dimension vector and tensors.
+
+These packages do not offer anything that more established packages do not already provide.
+
+I will add documentation in my free time from time to time.
