@@ -7,7 +7,7 @@ BeginPackage["DdimPackage`", {"YoungSymm`","DdimVariables`"}]
 (*Messages*)
 
 
-MassDimension::usage = "..."
+MassDimension::usage = "MassDimension[expr] gives the mass dimension of expr, where the mass dimension of a Momentum is 1, of a FieldStr is 1, of a Riemann is 2, of a Mandelstam is 2, and of a Mass is 1. \n If expr is a sum of terms with different mass dimensions, MassDimension will issue a warning and return a subset of terms which have the same mass dimension."
 
 RelabelDummies::usage = "..."
 Relabel::usage = "..."
@@ -514,3 +514,16 @@ End[]
 Protect @@ Names["DdimPackage`*"]
 
 EndPackage[]
+
+
+(* If[
+	ValueQ[Global`$DdimAddOn] && MemberQ[Flatten @ {Global`$DdimAddOn}, "TensorReduction"],
+	Needs[
+		"TensorReduction`",
+		FileNameJoin[{DirectoryName[$InputFileName], "TensorReduction.wl"}]
+	];
+	If[
+		FreeQ[$ContextPath, "TensorReduction`"],
+		AppendTo[$ContextPath, "TensorReduction`"]
+	]
+] *)
