@@ -14,36 +14,40 @@ external momenta: \[LeftAngleBracket]\*SubsuperscriptBox[\"p\", \"j\", \"\[Mu]\"
 pD::usage = "..."
 MetricPerp::usage = "MetricPerp[\[Mu],\[Nu]] is the metric on the subspace orthogonal to the physical one: \[Eta]^\[Perpendicular]_{\[Mu]\[Nu]} = \[Eta]_{\[Mu]\[Nu]} - u_{\[Mu]\[Nu]}. \n \n \t Use SubMetricPerp to expand it."
 etaP::usage = "..."
+DualMetric::usage = "..."
+dM::usage = "..."
 
 
 DeclareExternalMomenta::usage = "DeclareExternalMomenta[{p1,p2,...}] sets up the tensor-reduction environment for the given list of external momenta. It stores the Gram matrix, its determinant, and its inverse, and defines the replacement rules used to expand UMatrix[\[Mu],\[Nu]], MomentumDual[k,\[Mu]], and MetricPerp[\[Mu],\[Nu]]. Any previous declaration is cleared first."
+ClearExternalMomenta::usage = "ClearExternalMomenta[] resets the tensor reduction environment, clearing all previously declared external momenta and some precomputed data."
+
+(*TensorReduction::usage = "..."*)
 ExternalMomenta::usage = "ExternalMomenta[] returns the list of declared external momenta."
-
-TensorReduction::usage = "..."
-
 GramMatrix::usage = "..."
 GramDeterminant::usage = "..."
 InverseGramMatrix::usage = "..."
 ProjectorRule::usage = "..."
 DualMomentumRule::usage = "..."
 
-Gram::usage = "..."
+
+PartitionsK::usage = "..."
+
+WickTheorem::usage = "..."
+ord::usage = "..."
+contr::usage = "..."
+
 
 SubProducts::usage = "..."
 SubMetricPerp::usage = "..."
 SubUMatrix::usage = "..."
 
 ExpandTensorReduction::usage = "ExpandTensorReduction[expr] applies the full set of substitutions to expand MetricPerp, MomentumDual and UMatrix into explicit basis expressions."
+
 UnitTensor::usage = "UnitTensor[rank] generates the unit tensor of the given rank in the declared basis."
 
-WickTheorem::usage = "..."
-ord::usage = "..."
-contr::usage = "..."
-dualMetric::usage = "..."
-
-PartitionsK::usage = "..."
 
 $d::usage = "..."
+Gram::usage = "..."
 
 
 (* ::Section:: *)
@@ -73,7 +77,7 @@ UnitTensor::arg = "UnitTensor expects a positive integer rank."
 Begin["`Private`"]
 
 
-(* ::Section:: *)
+(* ::Section::Closed:: *)
 (*Boxes*)
 
 
@@ -104,7 +108,16 @@ pDBox[mom_, k_, a_] :=
     ]
 
 
-(* ::Section:: *)
+dMBox[display_, args__] :=
+    TemplateBox[
+        {display, args},
+        "dM",
+        DisplayFunction -> (RowBox[{"\[LeftAngleBracket]", #1, "\[RightAngleBracket]"}]&),
+        InterpretationFunction -> (RowBox[{"dM","[",RowBox[{TemplateSlotSequence[2, ","]}],"]"}]&)
+    ]
+
+
+(* ::Section::Closed:: *)
 (*UMatrix, MetricPerp, MomentumDual*)
 
 
@@ -130,7 +143,21 @@ pD /: MakeBoxes[pD[k_, a_], form : (StandardForm | TraditionalForm)] :=
     ]
 
 
-(* ::Section:: *)
+DualMetric[] := 1
+dM[] := 1
+DualMetric[args__List] := dM[args]
+
+dM /: MakeBoxes[dM[args : {_, _} ..], form : (StandardForm | TraditionalForm)] := 
+    dMBox[
+        RowBox @ Riffle[
+            (MakeBoxes[#, form]& /@ (etaP @@@ {args})),
+            "\[ThinSpace]"
+        ],
+        Sequence @@ (MakeBoxes[#, form]& /@ {args})
+    ]
+
+
+(* ::Section::Closed:: *)
 (*$tensorReduction*)
 
 
@@ -205,7 +232,9 @@ buildTensorReduction[ext_List] :=
             With[
                 {momenta = ext, delta = deltaMatrix},
 
-                uM[lor1_, lor2_] :> Table[Momentum[p, lor1], {p, momenta}] . delta . Table[Momentum[p, lor2], {p, momenta}]
+                (* uM[lor1_, lor2_] :> Table[Momentum[p, lor1], {p, momenta}] . delta . Table[Momentum[p, lor2], {p, momenta}] *)
+                (* To avoid the appearance of TensorReduction`Private`lor1, and so on... *)
+                uM[TensorReduction`m_, TensorReduction`n_] :> (Map[Momentum[#, TensorReduction`m] &, momenta] . delta . Map[Momentum[#, TensorReduction`n] &, momenta])
             ];
             
         (* MomentumDual is the dual basis associated with ext: MomentumDual[k]^lor = \[CapitalDelta]_{k i} p_i^lor *)
@@ -213,7 +242,8 @@ buildTensorReduction[ext_List] :=
             With[
                 {momenta = ext, delta = deltaMatrix, pos = position},
                 
-                pD[k_, lor_] /; KeyExistsQ[pos, k] :> delta[[pos[k]]] . Table[Momentum[p, lor], {p, momenta}]
+                (* pD[k_, lor_] /; KeyExistsQ[pos, k] :> delta[[pos[k]]] . Table[Momentum[p, lor], {p, momenta}] *)
+                pD[TensorReduction`k_, TensorReduction`m_] /; KeyExistsQ[pos, TensorReduction`k] :> (delta[[pos[TensorReduction`k]]] . Map[Momentum[#, TensorReduction`m] &, momenta])
             ];
         
         <|
@@ -238,7 +268,7 @@ SubProducts[exp_] :=
         {ord, contr, localexp = exp},
         
         ord[list_List] := Product[uM[mu[i], nu[i]], {i, list}];
-        contr[lists__List] := Product[etaP[Sequence @@ (mu /@ list)], {list, {lists}}] * dualMetric[Sequence @@ Map[nu, {lists}, {2}]];
+        contr[lists__List] := Product[etaP[Sequence @@ (mu /@ list)], {list, {lists}}] * dM[Sequence @@ Map[nu, {lists}, {2}]];
         
         Return[localexp]
     ]
@@ -290,13 +320,13 @@ DeclareExternalMomenta[___] :=
 (*Reduction Helpers*)
 
 
-TensorReduction[] :=
+(*TensorReduction[] :=
     If[
         declaredQ[],
         $tensorReduction,
         Message[TensorReduction::undef];
         $Failed
-    ]
+    ]*)
 
 ExternalMomenta[] := externalLookup["ExternalMomenta"]
 GramMatrix[] := externalLookup["GramMatrix"]
@@ -309,16 +339,16 @@ DualMomentumRule[] := externalLookup["DualMomentumRule"]
 (* This is the public helper that reproduces the basic notebook substitution
    chain: MetricPerp -> Metric - UMatrix, then MomentumDual expansion, then UMatrix expansion. *)
 ExpandTensorReduction[expr_] :=
-    Block[{rules, expanded, dualMetric},
+    Block[{rules, expanded, dM},
         If[!declaredQ[],
             Message[TensorReduction::undef];
             Return[$Failed]
         ];
 
-        rules = Union @ Cases[expr, dualMetric[args__List] :> 2 Length[{args}], {0, Infinity}];
+        rules = Union @ Cases[expr, dM[args__List] :> 2 Length[{args}], {0, Infinity}];
         rules = loadDualMetric /@ rules;
         
-        expanded = expr;
+        expanded = expr //. rules;
         expanded = SubUMatrix[SubMetricPerp[expanded]]
     ]
 
@@ -492,11 +522,11 @@ storeDualMetric[n_Integer?EvenQ] :=
 
         lhs = "{m" <> ToString[2 # - 1] <> "_, m" <> ToString[2 #] <> "_}" & /@ Range[n/2];
         
-        lhs   = "dualMetric[" <> StringRiffle[lhs, ", "] <> "]";
+        lhs   = "dM[" <> StringRiffle[lhs, ", "] <> "]";
         
-        def   = lhs <> " := " <> ToString[generateDualMetric[n], InputForm];
+        def   = lhs <> " :> " <> ToString[generateDualMetric[n], InputForm];
 
-        file  = FileNameJoin[{$dualMetricCacheDir, "dualMetric" <> ToString[n] <> ".m"}];
+        file  = FileNameJoin[{$dualMetricCacheDir, "dM" <> ToString[n] <> ".m"}];
         
         If[!DirectoryQ[$dualMetricCacheDir], CreateDirectory[$dualMetricCacheDir]];
 
@@ -509,7 +539,7 @@ storeDualMetric[n_Integer?EvenQ] :=
 loadDualMetric[n_Integer?EvenQ] := 
     loadDualMetric[n] =
         Block[
-            {file = FileNameJoin[{$dualMetricCacheDir, "dualMetric" <> ToString[n] <> ".m"}]},
+            {file = FileNameJoin[{$dualMetricCacheDir, "dM" <> ToString[n] <> ".m"}]},
             
             If[!FileExistsQ[file], storeDualMetric[n]];
         
