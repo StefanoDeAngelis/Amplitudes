@@ -48,9 +48,9 @@ contr::usage = "..."
 SubMetricPerp::usage = "..."
 SubUMatrix::usage = "..."
 
-ExpandTensorReduction::usage = "ExpandTensorReduction[expr] applies the full set of substitutions to expand MetricPerp, MomentumDual and UMatrix into explicit basis expressions."
+ExpandTensorReduction::usage = "ExpandTensorReduction[expr, Gram -> True|False] applies the full set of substitutions to expand MetricPerp, MomentumDual and UMatrix into explicit basis expressions. With Gram -> True it also replaces the formal symbol Gram with GramDeterminant[]."
 
-UnitTensor::usage = "UnitTensor[rank, ExpandTensorReduction -> True|False] generates the unit tensor of the given rank in the declared basis. By default it leaves MetricPerp, MomentumDual and UMatrix unexpanded."
+UnitTensor::usage = "UnitTensor[rank, ExpandTensorReduction -> True|False, Gram -> True|False] generates the unit tensor of the given rank in the declared basis. By default it leaves MetricPerp, MomentumDual and UMatrix unexpanded; when expansion is requested, Gram is forwarded to ExpandTensorReduction."
 
 
 $d::usage = "..."
@@ -62,6 +62,7 @@ Gram::usage = "..."
 
 
 TensorReduction::undef = "No (or inappropriate) external momenta have been declared. Call DeclareExternalMomenta[ext_List] first, with ext not empty and free of duplicates."
+ExpandTensorReduction::undef = "No (or inappropriate) external momenta have been declared. Call DeclareExternalMomenta[ext_List] first, with ext not empty and free of duplicates."
 
 
 DeclareExternalMomenta::arg = "DeclareExternalMomenta expects a non-empty list of external momenta."
@@ -69,8 +70,8 @@ DeclareExternalMomenta::dup = "The external momenta must be duplicate-free. Rece
 DeclareExternalMomenta::sing = "The Gram matrix built from `1` is not invertible, so the tensor reduction cannot be generated."
 
 
-UnitTensor::undef = "No (or inappropriate) external momenta have been declared. Call DeclareExternalMomenta[ext_List] first."
 UnitTensor::arg = "UnitTensor expects a positive integer rank."
+UnitTensor::warn = "UnitTensor[`1`] may be expensive: the computational complexity grows very fast with the rank."
 
 
 (* ::Chapter:: *)
@@ -136,6 +137,8 @@ uM /: MakeBoxes[uM[mu_, nu_], StandardForm | TraditionalForm] := uMBox[ToLabel[m
 
 
 MetricPerp[a_, b_] := etaP[a, b]
+
+etaP[a_, b_] /; !OrderedQ[{a, b}] := etaP[b, a]
 
 etaP /: MakeBoxes[etaP[\[Mu]_,\[Nu]_], StandardForm | TraditionalForm] := etaPBox[ToLabel[\[Mu]],ToLabel[\[Nu]]]
 
@@ -464,10 +467,13 @@ DualMomentumRule[] := externalLookup["DualMomentumRule"]
 
 (* This is the public helper that reproduces the basic notebook substitution
    chain: MetricPerp -> Metric - UMatrix, then MomentumDual expansion, then UMatrix expansion. *)
-ExpandTensorReduction[expr_] :=
+Options[ExpandTensorReduction] = {Gram -> False};
+
+
+ExpandTensorReduction[expr_, OptionsPattern[]] :=
     Block[{rules, expanded, dM},
         If[!declaredQ[],
-            Message[TensorReduction::undef];
+            Message[ExpandTensorReduction::undef];
             Return[$Failed]
         ];
 
@@ -475,7 +481,14 @@ ExpandTensorReduction[expr_] :=
         rules = loadDualMetric /@ rules;
         
         expanded = expr //. rules;
-        expanded = SubUMatrix[SubMetricPerp[expanded]]
+        expanded = SubUMatrix[SubMetricPerp[expanded]];
+
+        If[
+            TrueQ[OptionValue[Gram]],
+            expanded = expanded /. Gram -> GramDeterminant[]
+        ];
+
+        expanded
     ]
 
 
@@ -538,17 +551,15 @@ subProducts[exp_] :=
     ]
 
 
-Options[UnitTensor] = {ExpandTensorReduction -> False};
+Options[UnitTensor] = {ExpandTensorReduction -> False, Gram -> False};
 
 
 UnitTensor[rank_Integer?Positive, OptionsPattern[]] :=
     Module[{expr},
-        (* UnitTensor depends on the basis-specific rules cached by DeclareExternalMomenta, so calling it before initialization is an error. *)
-        If[!declaredQ[],
-            Message[UnitTensor::undef];
-            Return[$Failed]
+        If[rank > 8,
+            Message[UnitTensor::warn, rank]
         ];
-        
+
         (* Build the abstract Wick sum, translate ord/contr into tensor factors, and optionally expand MetricPerp, MomentumDual and UMatrix into explicit basis expressions. *)
         expr =
             subProducts[
@@ -557,7 +568,8 @@ UnitTensor[rank_Integer?Positive, OptionsPattern[]] :=
         
         If[
             TrueQ[OptionValue[ExpandTensorReduction]],
-            expr = ExpandTensorReduction[expr]
+
+            expr = ExpandTensorReduction[expr, Gram -> OptionValue[Gram]]
         ];
         
         Return[expr]
