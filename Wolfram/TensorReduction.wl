@@ -3,7 +3,15 @@
 BeginPackage["TensorReduction`", {"DdimVariables`"}]
 
 
-(* ::Section:: *)
+(*TODO*)
+
+(*
+1. Algebra involving Metric, UMatrix, MetricPerp, MomentumDual, DualMetric, ExternalVectors[]
+2. Isolation of tensor structures to be reduced
+*)
+
+
+(* ::Section::Closed:: *)
 (*Messages*)
 
 
@@ -14,43 +22,47 @@ external momenta: \[LeftAngleBracket]\*SubsuperscriptBox[\"p\", \"j\", \"\[Mu]\"
 pD::usage = "..."
 MetricPerp::usage = "MetricPerp[\[Mu],\[Nu]] is the metric on the subspace orthogonal to the physical one: \[Eta]^\[Perpendicular]_{\[Mu]\[Nu]} = \[Eta]_{\[Mu]\[Nu]} - u_{\[Mu]\[Nu]}. \n \n \t Use SubMetricPerp to expand it."
 etaP::usage = "..."
+DualMetric::usage = "..."
+dM::usage = "..."
 
 
 DeclareExternalMomenta::usage = "DeclareExternalMomenta[{p1,p2,...}] sets up the tensor-reduction environment for the given list of external momenta. It stores the Gram matrix, its determinant, and its inverse, and defines the replacement rules used to expand UMatrix[\[Mu],\[Nu]], MomentumDual[k,\[Mu]], and MetricPerp[\[Mu],\[Nu]]. Any previous declaration is cleared first."
+ClearExternalMomenta::usage = "ClearExternalMomenta[] resets the tensor reduction environment, clearing all previously declared external momenta and some precomputed data."
+
+(*TensorReduction::usage = "..."*)
 ExternalMomenta::usage = "ExternalMomenta[] returns the list of declared external momenta."
-
-TensorReduction::usage = "..."
-
 GramMatrix::usage = "..."
 GramDeterminant::usage = "..."
 InverseGramMatrix::usage = "..."
 ProjectorRule::usage = "..."
 DualMomentumRule::usage = "..."
 
-Gram::usage = "..."
 
-SubProducts::usage = "..."
-SubMetricPerp::usage = "..."
-SubUMatrix::usage = "..."
-
-ExpandTensorReduction::usage = "ExpandTensorReduction[expr] applies the full set of substitutions to expand MetricPerp, MomentumDual and UMatrix into explicit basis expressions."
-UnitTensor::usage = "UnitTensor[rank] generates the unit tensor of the given rank in the declared basis."
+PartitionsK::usage = "..."
 
 WickTheorem::usage = "..."
 ord::usage = "..."
 contr::usage = "..."
-dualMetric::usage = "..."
 
-PartitionsK::usage = "..."
+
+SubMetricPerp::usage = "..."
+SubUMatrix::usage = "..."
+
+ExpandTensorReduction::usage = "ExpandTensorReduction[expr, Gram -> True|False] applies the full set of substitutions to expand MetricPerp, MomentumDual and UMatrix into explicit basis expressions. With Gram -> True it also replaces the formal symbol Gram with GramDeterminant[]."
+
+UnitTensor::usage = "UnitTensor[rank, ExpandTensorReduction -> True|False, Gram -> True|False] generates the unit tensor of the given rank in the declared basis. By default it leaves MetricPerp, MomentumDual and UMatrix unexpanded; when expansion is requested, Gram is forwarded to ExpandTensorReduction."
+
 
 $d::usage = "..."
+Gram::usage = "..."
 
 
-(* ::Section:: *)
+(* ::Section::Closed:: *)
 (*Errors*)
 
 
 TensorReduction::undef = "No (or inappropriate) external momenta have been declared. Call DeclareExternalMomenta[ext_List] first, with ext not empty and free of duplicates."
+ExpandTensorReduction::undef = "No (or inappropriate) external momenta have been declared. Call DeclareExternalMomenta[ext_List] first, with ext not empty and free of duplicates."
 
 
 DeclareExternalMomenta::arg = "DeclareExternalMomenta expects a non-empty list of external momenta."
@@ -58,22 +70,22 @@ DeclareExternalMomenta::dup = "The external momenta must be duplicate-free. Rece
 DeclareExternalMomenta::sing = "The Gram matrix built from `1` is not invertible, so the tensor reduction cannot be generated."
 
 
-UnitTensor::undef = "No (or inappropriate) external momenta have been declared. Call DeclareExternalMomenta[ext_List] first."
 UnitTensor::arg = "UnitTensor expects a positive integer rank."
+UnitTensor::warn = "UnitTensor[`1`] may be expensive: the computational complexity grows very fast with the rank."
 
 
 (* ::Chapter:: *)
 (*Tensor Reduction*)
 
 
-(* ::Section:: *)
+(* ::Section::Closed:: *)
 (*Begin*)
 
 
 Begin["`Private`"]
 
 
-(* ::Section:: *)
+(* ::Section::Closed:: *)
 (*Boxes*)
 
 
@@ -104,8 +116,17 @@ pDBox[mom_, k_, a_] :=
     ]
 
 
-(* ::Section:: *)
-(*UMatrix, MetricPerp, MomentumDual*)
+dMBox[display_, args__] :=
+    TemplateBox[
+        {display, args},
+        "dM",
+        DisplayFunction -> (RowBox[{"\[LeftAngleBracket]", #1, "\[RightAngleBracket]"}]&),
+        InterpretationFunction -> (RowBox[{"dM","[",RowBox[{TemplateSlotSequence[2, ","]}],"]"}]&)
+    ]
+
+
+(* ::Section::Closed:: *)
+(*Basic objects: UMatrix, MetricPerp, MomentumDual, DualMetric*)
 
 
 UMatrix[a_, b_] = uM[a, b];
@@ -116,6 +137,8 @@ uM /: MakeBoxes[uM[mu_, nu_], StandardForm | TraditionalForm] := uMBox[ToLabel[m
 
 
 MetricPerp[a_, b_] := etaP[a, b]
+
+etaP[a_, b_] /; !OrderedQ[{a, b}] := etaP[b, a]
 
 etaP /: MakeBoxes[etaP[\[Mu]_,\[Nu]_], StandardForm | TraditionalForm] := etaPBox[ToLabel[\[Mu]],ToLabel[\[Nu]]]
 
@@ -130,14 +153,32 @@ pD /: MakeBoxes[pD[k_, a_], form : (StandardForm | TraditionalForm)] :=
     ]
 
 
-(* ::Section:: *)
+DualMetric[] := 1
+dM[] := 1
+DualMetric[args__List] := dM[args]
+
+dM /: MakeBoxes[dM[args : {_, _} ..], form : (StandardForm | TraditionalForm)] := 
+    dMBox[
+        RowBox @ Riffle[
+            (MakeBoxes[#, form]& /@ (etaP @@@ {args})),
+            "\[ThinSpace]"
+        ],
+        Sequence @@ (MakeBoxes[#, form]& /@ {args})
+    ]
+
+
+(* ::Section::Closed:: *)
+(*Auxiliary functions*)
+
+
+(* ::Subsection::Closed:: *)
 (*$tensorReduction*)
 
 
 (* Design overview:
    - Declaring external momenta fixes the basis for the reduction.
    - Every basis-dependent object is precomputed once and stored in a single Association.
-   - UnitTensor first builds the abstract Wick-like combinatorics and expands the abstract tensors into explicit Momentum[...] data. *)
+   - UnitTensor first builds the abstract Wick-like combinatorics and can optionally expand the abstract tensors into explicit Momentum[...] data. *)
 
 
 (* All kinematic data generated is stored in the variable $tensorReduction so a fresh kernel only needs DeclareExternalMomenta[...] to reconstruct the reduction setup. *)
@@ -145,15 +186,15 @@ pD /: MakeBoxes[pD[k_, a_], form : (StandardForm | TraditionalForm)] :=
 $tensorReduction = <||>;
 
 
-(* ::Section:: *)
-(*Auxiliary functions*)
+(* ::Subsection::Closed:: *)
+(*declaredQ*)
 
 
 declaredQ[] := AssociationQ[$tensorReduction] && KeyExistsQ[$tensorReduction, "ExternalMomenta"]
 
 
-(* Resetting the Association is enough to invalidate the whole setup because every public variable derives from the same shared variable. *)
-ClearExternalMomenta[] := ($tensorReduction = <||>;)
+(* ::Subsection::Closed:: *)
+(*externalLookUp*)
 
 
 (* Single lookup helper so every quantity shares the same initialization check and error behaviour. *)
@@ -164,6 +205,10 @@ externalLookup[key_] :=
         Message[TensorReduction::undef];
         $Failed
     ]
+
+
+(* ::Subsection::Closed:: *)
+(*buildTensorReduction*)
 
 
 buildTensorReduction[ext_List] :=
@@ -205,7 +250,9 @@ buildTensorReduction[ext_List] :=
             With[
                 {momenta = ext, delta = deltaMatrix},
 
-                uM[lor1_, lor2_] :> Table[Momentum[p, lor1], {p, momenta}] . delta . Table[Momentum[p, lor2], {p, momenta}]
+                (* uM[lor1_, lor2_] :> Table[Momentum[p, lor1], {p, momenta}] . delta . Table[Momentum[p, lor2], {p, momenta}] *)
+                (* To avoid the appearance of TensorReduction`Private`lor1, and so on... *)
+                uM[TensorReduction`m_, TensorReduction`n_] :> (Map[Momentum[#, TensorReduction`m] &, momenta] . delta . Map[Momentum[#, TensorReduction`n] &, momenta])
             ];
             
         (* MomentumDual is the dual basis associated with ext: MomentumDual[k]^lor = \[CapitalDelta]_{k i} p_i^lor *)
@@ -213,7 +260,8 @@ buildTensorReduction[ext_List] :=
             With[
                 {momenta = ext, delta = deltaMatrix, pos = position},
                 
-                pD[k_, lor_] /; KeyExistsQ[pos, k] :> delta[[pos[k]]] . Table[Momentum[p, lor], {p, momenta}]
+                (* pD[k_, lor_] /; KeyExistsQ[pos, k] :> delta[[pos[k]]] . Table[Momentum[p, lor], {p, momenta}] *)
+                pD[TensorReduction`k_, TensorReduction`m_] /; KeyExistsQ[pos, TensorReduction`k] :> (delta[[pos[TensorReduction`k]]] . Map[Momentum[#, TensorReduction`m] &, momenta])
             ];
         
         <|
@@ -228,163 +276,7 @@ buildTensorReduction[ext_List] :=
     ]
 
 
-(* ::Subsection:: *)
-(*Definition, properties and substitutions*)
-
-
-(* Substitute the abstract Wick placeholders into actual tensor objects. *)
-SubProducts[exp_] := 
-    Block[
-        {ord, contr, localexp = exp},
-        
-        ord[list_List] := Product[uM[mu[i], nu[i]], {i, list}];
-        contr[lists__List] := Product[etaP[Sequence @@ (mu /@ list)], {list, {lists}}] * dualMetric[Sequence @@ Map[nu, {lists}, {2}]];
-        
-        Return[localexp]
-    ]
-
-
-(* The transverse metric is left abstract during the combinatoric stage and only resolved into Metric - UMatrix when the final expression is expanded. *)
-SubMetricPerp[exp_] := Block[{etaP, localexp = exp}, etaP[lor1_, lor2_] := Metric[lor1, lor2] - uM[lor1, lor2]; Return[localexp]]
-
-
-SubUMatrix[exp_] := exp /. DualMomentumRule[] /. ProjectorRule[]
-
-
-(* ::Section:: *)
-(*DeclareExternalMomenta*)
-
-
-DeclareExternalMomenta[ext_List] :=
-    Module[{state},
-        (* ext is treated as an ordered basis. Empty lists and duplicates are rejected. *)
-        If[ext === {} || !ListQ[ext],
-            Message[DeclareExternalMomenta::arg];
-            Return[$Failed]
-        ];
-        
-        If[!DuplicateFreeQ[ext],
-            Message[DeclareExternalMomenta::dup, ext];
-            Return[$Failed]
-        ];
-        
-        state = buildTensorReduction[ext];
-        
-        (* A singular Gram matrix means the chosen external momenta do not define are not independent. *)
-        If[state === $Failed,
-            Message[DeclareExternalMomenta::sing, ext];
-            Return[$Failed]
-        ];
-        
-        $tensorReduction = state;
-    ]
-
-DeclareExternalMomenta[___] :=
-    (
-        Message[DeclareExternalMomenta::arg];
-        $Failed
-    )
-
-
-(* ::Section:: *)
-(*Reduction Helpers*)
-
-
-TensorReduction[] :=
-    If[
-        declaredQ[],
-        $tensorReduction,
-        Message[TensorReduction::undef];
-        $Failed
-    ]
-
-ExternalMomenta[] := externalLookup["ExternalMomenta"]
-GramMatrix[] := externalLookup["GramMatrix"]
-GramDeterminant[] := externalLookup["GramDeterminant"]
-InverseGramMatrix[] := externalLookup["InverseGramMatrix"]
-ProjectorRule[] := externalLookup["ProjectorRule"]
-DualMomentumRule[] := externalLookup["DualMomentumRule"]
-
-
-(* This is the public helper that reproduces the basic notebook substitution
-   chain: MetricPerp -> Metric - UMatrix, then MomentumDual expansion, then UMatrix expansion. *)
-ExpandTensorReduction[expr_] :=
-    Block[{rules, expanded, dualMetric},
-        If[!declaredQ[],
-            Message[TensorReduction::undef];
-            Return[$Failed]
-        ];
-
-        rules = Union @ Cases[expr, dualMetric[args__List] :> 2 Length[{args}], {0, Infinity}];
-        rules = loadDualMetric /@ rules;
-        
-        expanded = expr;
-        expanded = SubUMatrix[SubMetricPerp[expanded]]
-    ]
-
-
-(* ::Section:: *)
-(*UnitTensor*)
-
-
-UnitTensor[rank_Integer?Positive] :=
-    Module[{expr},
-        (* UnitTensor depends on the basis-specific rules cached by DeclareExternalMomenta, so calling it before initialization is an error. *)
-        If[!declaredQ[],
-            Message[UnitTensor::undef];
-            Return[$Failed]
-        ];
-        
-        (* Build the abstract Wick sum, translate ord/contr into tensor factors, then expand MetricPerp, MomentumDual and UMatrix into explicit basis expressions. *)
-        expr =
-            ExpandTensorReduction[
-                SubProducts[
-                    WickTheorem[Range[rank]]
-                ]
-            ]
-    ]
-
-UnitTensor[___] :=
-    (
-        Message[UnitTensor::arg];
-        $Failed
-    )
-
-
-(* ::Section:: *)
-(*Wick Contraction*)
-
-
-(* Generate all pairings/contractions of the elements of a list. *)
-wickContractions[{}] := 1
-wickContractions[{a_, b_}] := contr[{a, b}]
-
-wickContractions[list_List] :=
-    Block[
-        {
-            sublist = Delete[list, 1],
-            first = list[[1]]
-        },
-        
-        Expand[
-            Sum[
-                contr[{first, sublist[[i]]}] * wickContractions[Delete[sublist, i]],
-                {i, Length @ sublist}
-            ]
-        ]
-    ] //. contr[list1__] contr[list2__] :> contr[list1, list2]
-
-
-(* Choose any even-cardinality subset to apply Wick's theorem and leave the complement. *)
-WickTheorem[list_List] :=
-    Expand[
-        Plus @@ (
-            (ord[Complement[list, Flatten[#]]]*wickContractions[#]) & /@ Prepend[Subsets[list, {2, Length @ list, 2}], {}]
-        )
-    ]
-
-
-(* ::Section:: *)
+(* ::Subsection::Closed:: *)
 (*Lorentz indices*)
 
 
@@ -393,22 +285,8 @@ mu[i_Integer] := ToExpression["\[Mu]" <> ToString[i]]
 nu[i_Integer] := ToExpression["\[Nu]" <> ToString[i]]
 
 
-(* ::Section:: *)
-(*Partitions*)
-
-
-PartitionsK[list_,l_]/;Length[list]==l:={{list}}
-
-PartitionsK[list_,l_]:= (*Iterative definition of the partitions of a set in subsets with l elements (Length[list]/l has to be an integer)*)
-    Join@@
-        Table[
-            {x,##} & @@@ PartitionsK[Complement[list, x], l], (*# represent the first argument supplied to a pure function, ## represents a slot of arguments*)
-            {x, Subsets[list, {l}, Binomial[Length[list]-1, l-1]]}(*Binomial[Length[list]-1,l-1] is the number of subsets with the first element of list. This avoids repetitions.*)
-        ]
-
-
-(* ::Section:: *)
-(*generateDualMetric*)
+(* ::Subsection::Closed:: *)
+(*generateDualMetric, storeDualMetric and loadDualMetric*)
 
 
 perpSimplify[exp_]:=
@@ -492,11 +370,11 @@ storeDualMetric[n_Integer?EvenQ] :=
 
         lhs = "{m" <> ToString[2 # - 1] <> "_, m" <> ToString[2 #] <> "_}" & /@ Range[n/2];
         
-        lhs   = "dualMetric[" <> StringRiffle[lhs, ", "] <> "]";
+        lhs   = "dM[" <> StringRiffle[lhs, ", "] <> "]";
         
-        def   = lhs <> " := " <> ToString[generateDualMetric[n], InputForm];
+        def   = lhs <> " :> " <> ToString[generateDualMetric[n], InputForm];
 
-        file  = FileNameJoin[{$dualMetricCacheDir, "dualMetric" <> ToString[n] <> ".m"}];
+        file  = FileNameJoin[{$dualMetricCacheDir, "dM" <> ToString[n] <> ".m"}];
         
         If[!DirectoryQ[$dualMetricCacheDir], CreateDirectory[$dualMetricCacheDir]];
 
@@ -509,12 +387,200 @@ storeDualMetric[n_Integer?EvenQ] :=
 loadDualMetric[n_Integer?EvenQ] := 
     loadDualMetric[n] =
         Block[
-            {file = FileNameJoin[{$dualMetricCacheDir, "dualMetric" <> ToString[n] <> ".m"}]},
+            {file = FileNameJoin[{$dualMetricCacheDir, "dM" <> ToString[n] <> ".m"}]},
             
             If[!FileExistsQ[file], storeDualMetric[n]];
         
             Get[file]
         ]
+
+
+(* ::Section::Closed:: *)
+(*SubMetricPerp and SubUMatrix*)
+
+
+(* The transverse metric is left abstract during the combinatoric stage and only resolved into Metric - UMatrix when the final expression is expanded. *)
+SubMetricPerp[exp_] := Block[{etaP, localexp = exp}, etaP[lor1_, lor2_] := Metric[lor1, lor2] - uM[lor1, lor2]; Return[localexp]]
+
+
+SubUMatrix[exp_] := exp /. DualMomentumRule[] /. ProjectorRule[]
+
+
+(* ::Section::Closed:: *)
+(*DeclareExternalMomenta*)
+
+
+DeclareExternalMomenta[ext_List] :=
+    Module[{state},
+        (* ext is treated as an ordered basis. Empty lists and duplicates are rejected. *)
+        If[ext === {} || !ListQ[ext],
+            Message[DeclareExternalMomenta::arg];
+            Return[$Failed]
+        ];
+        
+        If[!DuplicateFreeQ[ext],
+            Message[DeclareExternalMomenta::dup, ext];
+            Return[$Failed]
+        ];
+        
+        state = buildTensorReduction[ext];
+        
+        (* A singular Gram matrix means the chosen external momenta do not define are not independent. *)
+        If[state === $Failed,
+            Message[DeclareExternalMomenta::sing, ext];
+            Return[$Failed]
+        ];
+        
+        $tensorReduction = state;
+    ]
+
+
+DeclareExternalMomenta[___] :=
+    (
+        Message[DeclareExternalMomenta::arg];
+        $Failed
+    )
+
+
+(* Resetting the Association is enough to invalidate the whole setup because every public variable derives from the same shared variable. *)
+ClearExternalMomenta[] := ($tensorReduction = <||>;)
+
+
+(* ::Section::Closed:: *)
+(*Reduction Helpers*)
+
+
+ExternalMomenta[] := externalLookup["ExternalMomenta"]
+GramMatrix[] := externalLookup["GramMatrix"]
+GramDeterminant[] := externalLookup["GramDeterminant"]
+InverseGramMatrix[] := externalLookup["InverseGramMatrix"]
+ProjectorRule[] := externalLookup["ProjectorRule"]
+DualMomentumRule[] := externalLookup["DualMomentumRule"]
+(*TensorReduction[] :=
+    If[
+        declaredQ[],
+        $tensorReduction,
+        Message[TensorReduction::undef];
+        $Failed
+    ]*)
+
+
+(* This is the public helper that reproduces the basic notebook substitution
+   chain: MetricPerp -> Metric - UMatrix, then MomentumDual expansion, then UMatrix expansion. *)
+Options[ExpandTensorReduction] = {Gram -> False};
+
+
+ExpandTensorReduction[expr_, OptionsPattern[]] :=
+    Block[{rules, expanded, dM},
+        If[!declaredQ[],
+            Message[ExpandTensorReduction::undef];
+            Return[$Failed]
+        ];
+
+        rules = Union @ Cases[expr, dM[args__List] :> 2 Length[{args}], {0, Infinity}];
+        rules = loadDualMetric /@ rules;
+        
+        expanded = expr //. rules;
+        expanded = SubUMatrix[SubMetricPerp[expanded]];
+
+        If[
+            TrueQ[OptionValue[Gram]],
+            expanded = expanded /. Gram -> GramDeterminant[]
+        ];
+
+        expanded
+    ]
+
+
+(* ::Section::Closed:: *)
+(*Partitions and Wick Contraction*)
+
+
+PartitionsK[list_,l_]/;Length[list]==l:={{list}}
+
+PartitionsK[list_,l_]:= (*Iterative definition of the partitions of a set in subsets with l elements (Length[list]/l has to be an integer)*)
+    Join@@
+        Table[
+            {x,##} & @@@ PartitionsK[Complement[list, x], l], (*# represent the first argument supplied to a pure function, ## represents a slot of arguments*)
+            {x, Subsets[list, {l}, Binomial[Length[list]-1, l-1]]}(*Binomial[Length[list]-1,l-1] is the number of subsets with the first element of list. This avoids repetitions.*)
+        ]
+
+
+(* Generate all pairings/contractions of the elements of a list. *)
+wickContractions[{}] := 1
+wickContractions[{a_, b_}] := contr[{a, b}]
+
+wickContractions[list_List] :=
+    Block[
+        {
+            sublist = Delete[list, 1],
+            first = list[[1]]
+        },
+        
+        Expand[
+            Sum[
+                contr[{first, sublist[[i]]}] * wickContractions[Delete[sublist, i]],
+                {i, Length @ sublist}
+            ]
+        ]
+    ] //. contr[list1__] contr[list2__] :> contr[list1, list2]
+
+
+(* Choose any even-cardinality subset to apply Wick's theorem and leave the complement. *)
+WickTheorem[list_List] :=
+    Expand[
+        Plus @@ (
+            (ord[Complement[list, Flatten[#]]]*wickContractions[#]) & /@ Prepend[Subsets[list, {2, Length @ list, 2}], {}]
+        )
+    ]
+
+
+(* ::Section:: *)
+(*UnitTensor*)
+
+
+(* Substitute the abstract Wick placeholders into actual tensor objects. *)
+subProducts[exp_] := 
+    Block[
+        {ord, contr, localexp = exp},
+        
+        ord[list_List] := Product[uM[mu[i], nu[i]], {i, list}];
+        contr[lists__List] := Product[etaP[Sequence @@ (mu /@ list)], {list, {lists}}] * dM[Sequence @@ Map[nu, {lists}, {2}]];
+        
+        Return[localexp]
+    ]
+
+
+Options[UnitTensor] = {ExpandTensorReduction -> False, Gram -> False};
+
+
+UnitTensor[rank_Integer?Positive, OptionsPattern[]] :=
+    Module[{expr},
+        If[rank > 8,
+            Message[UnitTensor::warn, rank]
+        ];
+
+        (* Build the abstract Wick sum, translate ord/contr into tensor factors, and optionally expand MetricPerp, MomentumDual and UMatrix into explicit basis expressions. *)
+        expr =
+            subProducts[
+                WickTheorem[Range[rank]]
+            ];
+        
+        If[
+            TrueQ[OptionValue[ExpandTensorReduction]],
+
+            expr = ExpandTensorReduction[expr, Gram -> OptionValue[Gram]]
+        ];
+        
+        Return[expr]
+    ]
+
+
+UnitTensor[___] :=
+    (
+        Message[UnitTensor::arg];
+        $Failed
+    )
 
 
 (* ::Section::Closed:: *)
