@@ -252,7 +252,7 @@ buildTensorReduction[ext_List] :=
 
                 (* uM[lor1_, lor2_] :> Table[Momentum[p, lor1], {p, momenta}] . delta . Table[Momentum[p, lor2], {p, momenta}] *)
                 (* To avoid the appearance of TensorReduction`Private`lor1, and so on... *)
-                uM[TensorReduction`m_, TensorReduction`n_] :> (Map[Momentum[#, TensorReduction`m] &, momenta] . delta . Map[Momentum[#, TensorReduction`n] &, momenta])
+                uM[m_, n_] :> (Map[Momentum[#, m] &, momenta] . delta . Map[Momentum[#, n] &, momenta])
             ];
             
         (* MomentumDual is the dual basis associated with ext: MomentumDual[k]^lor = \[CapitalDelta]_{k i} p_i^lor *)
@@ -261,7 +261,7 @@ buildTensorReduction[ext_List] :=
                 {momenta = ext, delta = deltaMatrix, pos = position},
                 
                 (* pD[k_, lor_] /; KeyExistsQ[pos, k] :> delta[[pos[k]]] . Table[Momentum[p, lor], {p, momenta}] *)
-                pD[TensorReduction`k_, TensorReduction`m_] /; KeyExistsQ[pos, TensorReduction`k] :> (delta[[pos[TensorReduction`k]]] . Map[Momentum[#, TensorReduction`m] &, momenta])
+                pD[k_, m_] /; KeyExistsQ[pos, k] :> (delta[[pos[k]]] . Map[Momentum[#, m] &, momenta])
             ];
         
         <|
@@ -554,6 +554,7 @@ subProducts[exp_] :=
 Options[UnitTensor] = {ExpandTensorReduction -> False, Gram -> False};
 
 
+(* UnitTensor takes about 345 seconds for rank 14, with ExpandTensorReduction -> False *)
 UnitTensor[rank_Integer?Positive, OptionsPattern[]] :=
     Module[{expr},
         If[rank > 8,
@@ -575,6 +576,8 @@ UnitTensor[rank_Integer?Positive, OptionsPattern[]] :=
         Return[expr]
     ]
 
+
+UnitTensor[0, OptionsPattern[]] := 1;
 
 UnitTensor[___] :=
     (
